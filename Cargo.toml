@@ -1,0 +1,12 @@
+cargo-features = ["edition2021"]
+[package]
+authors = ["Nico Lehmann <nlehmann@fb.com>"]
+edition = "2021"
+name = "jazz"
+version = "0.1.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = "0.1"
+serde = "1.0"
