@@ -2,14 +2,14 @@ use std::{any::Any, collections::HashMap, panic::RefUnwindSafe};
 
 use crate::{
     actor::{ActorName, PersistentActor},
-    context::Context,
+    context::{AnyContext, Effects},
     handler::Handler,
     message::{AnyMessage, Message, MessageName},
 };
 
 pub type AnyHandler =
-    dyn Fn(&dyn Any, &mut Context, AnyMessage) -> DispatchResult<()> + RefUnwindSafe;
-pub type AnyInit = dyn Fn(&dyn Any, &mut Context) -> DispatchResult<()> + RefUnwindSafe;
+    dyn Fn(&dyn Any, AnyContext, AnyMessage) -> DispatchResult<Effects> + RefUnwindSafe;
+pub type AnyInit = dyn Fn(&dyn Any, AnyContext) -> DispatchResult<Effects> + RefUnwindSafe;
 
 #[derive(PartialEq, Eq, Hash)]
 struct HandlerId(ActorName, MessageName);
@@ -41,21 +41,22 @@ impl DynTable {
         self.init.contains_key(&ActorName::name_for::<A>())
     }
 
-    pub fn register_handler<M, A>(&mut self)
+    pub fn register_handler<A, M>(&mut self)
     where
         M: Message,
         A: Handler<M>,
     {
         let handler =
-            |actor: &dyn Any, cx: &mut Context, message: AnyMessage| -> DispatchResult<()> {
+            |actor: &dyn Any, cx: AnyContext, message: AnyMessage| -> DispatchResult<Effects> {
                 let actor = actor
                     .downcast_ref::<A>()
                     .ok_or(DispatchError::TypeMissmatch)?;
+                let mut cx = cx.downcast::<A>().ok_or(DispatchError::TypeMissmatch)?;
                 let message = message
                     .downcast::<M>()
                     .ok_or(DispatchError::TypeMissmatch)?;
-                actor.handle(cx, message);
-                Ok(())
+                actor.handle(&mut cx, message);
+                Ok(cx.into_effects())
             };
         let handler_id = HandlerId(ActorName::name_for::<A>(), MessageName::name_for::<M>());
         if self.handlers.contains_key(&handler_id) {
@@ -68,12 +69,13 @@ impl DynTable {
     where
         A: PersistentActor,
     {
-        let init = |actor: &dyn Any, cx: &mut Context| -> DispatchResult<()> {
+        let init = |actor: &dyn Any, cx: AnyContext| -> DispatchResult<Effects> {
             let actor = actor
                 .downcast_ref::<A>()
                 .ok_or(DispatchError::TypeMissmatch)?;
-            actor.init(cx);
-            Ok(())
+            let mut cx = cx.downcast::<A>().ok_or(DispatchError::TypeMissmatch)?;
+            actor.init(&mut cx);
+            Ok(cx.into_effects())
         };
         let actor_name = ActorName::name_for::<A>();
         if self.init.contains_key(&actor_name) {
@@ -86,29 +88,27 @@ impl DynTable {
         &self,
         actor_name: ActorName,
         actor: &dyn Any,
-        cx: &mut Context,
-    ) -> DispatchResult<()> {
+        cx: AnyContext,
+    ) -> DispatchResult<Effects> {
         let init = self
             .init
             .get(&actor_name)
             .ok_or(DispatchError::MethodNotFound)?;
-        init(actor, cx)?;
-        Ok(())
+        init(actor, cx)
     }
 
     pub fn dispatch_handler(
         &self,
         actor_name: ActorName,
         actor: &dyn Any,
-        cx: &mut Context,
+        cx: AnyContext,
         message: AnyMessage,
-    ) -> DispatchResult<()> {
+    ) -> DispatchResult<Effects> {
         let handler_id = HandlerId(actor_name, message.name);
         let handler = self
             .handlers
             .get(&handler_id)
             .ok_or(DispatchError::MethodNotFound)?;
-        handler(actor, cx, message)?;
-        Ok(())
+        handler(actor, cx, message)
     }
 }

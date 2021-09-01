@@ -2,10 +2,10 @@ use std::{marker::PhantomData, panic::RefUnwindSafe};
 
 use super::context::Context;
 
-pub trait PersistentActor: 'static + RefUnwindSafe {
+pub trait PersistentActor: 'static + Sized + RefUnwindSafe {
     const NAME: &'static str;
 
-    fn init(&self, cx: &mut Context);
+    fn init(&self, cx: &mut Context<Self>) {}
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]
@@ -58,12 +58,26 @@ pub struct AnyActorId {
     value: u32,
 }
 
+impl<A> Clone for PersistentActorId<A>
+where
+    A: PersistentActor,
+{
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value.clone(),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<A> Copy for PersistentActorId<A> where A: PersistentActor {}
+
 impl AnyActorId {
     pub fn downcast<A>(&self) -> Option<PersistentActorId<A>>
     where
         A: PersistentActor,
     {
-        if self.name.0 != A::NAME {
+        if self.name != ActorName::name_for::<A>() {
             None
         } else {
             Some(PersistentActorId {

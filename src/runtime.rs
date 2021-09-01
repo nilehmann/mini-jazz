@@ -6,14 +6,15 @@ use std::{
 
 use crate::{
     actor::PersistentActorId,
-    database::{Database, DbError},
+    context::AnyContext,
+    database::Database,
     dyn_table::{DispatchError, DispatchResult, DynTable},
     global_storage::{GlobalStorageCache, StorageError},
 };
 
 use super::{
     actor::{AnyActorId, PersistentActor},
-    context::{Context, Effects},
+    context::Effects,
     handler::Handler,
     log::{Log, LogIndex},
     message::{AnyMessage, Message},
@@ -30,24 +31,22 @@ where
     log: L,
 }
 
-pub struct Runtime<L, D>
+pub struct Runtime<L>
 where
     L: Log,
-    D: Database,
 {
     table: DynTable,
     actors: HashMap<AnyActorId, ActorData<L>>,
     next_id: u32,
     // TODO: The same database is used across all actors, should we ensure isolation?
-    db: D,
+    db: Database,
 }
 
-impl<L, D> Runtime<L, D>
+impl<L> Runtime<L>
 where
     L: Log,
-    D: Database,
 {
-    pub fn new(db: D) -> Self {
+    pub fn new(db: Database) -> Self {
         Self {
             table: DynTable::new(),
             actors: HashMap::new(),
@@ -63,12 +62,12 @@ where
         self.table.register_actor::<A>();
     }
 
-    pub fn register_handler<M, A>(&mut self)
+    pub fn register_handler<A, M>(&mut self)
     where
-        M: Message,
         A: Handler<M>,
+        M: Message,
     {
-        self.table.register_handler::<M, A>();
+        self.table.register_handler::<A, M>();
     }
 
     pub fn add_actor<A>(&mut self, actor: A, log: L) -> PersistentActorId<A>
@@ -130,28 +129,26 @@ where
         }
     }
 
-    fn run_init(&mut self, table: &DynTable, db: &dyn Database) -> Result<Effects, RuntimeError> {
-        let mut cx = Context::new(db, &mut self.cache);
+    fn run_init(&mut self, table: &DynTable, db: &Database) -> Result<Effects, RuntimeError> {
+        let mut cx = AnyContext::new(self.id, db, &mut self.cache);
         catch_unwind_and_dispatch_errors(AssertUnwindSafe(|| {
-            table.dispatch_init(self.id.name, &self.actor, &mut cx)
+            table.dispatch_init(self.id.name, &self.actor, cx)
         }))
-        .map(|_| cx.into_effects())
     }
 
     fn run_handler(
         &mut self,
         table: &DynTable,
         message: AnyMessage,
-        db: &dyn Database,
+        db: &Database,
     ) -> Result<Effects, RuntimeError>
     where
         L: Log,
     {
-        let mut cx = Context::new(db, &mut self.cache);
+        let mut cx = AnyContext::new(self.id, db, &mut self.cache);
         catch_unwind_and_dispatch_errors(AssertUnwindSafe(|| {
-            table.dispatch_handler(self.id.name, &self.actor, &mut cx, message)
+            table.dispatch_handler(self.id.name, &self.actor, cx, message)
         }))
-        .map(|_| cx.into_effects())
     }
 }
 

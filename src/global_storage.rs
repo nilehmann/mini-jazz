@@ -1,21 +1,18 @@
 use std::{any::Any, collections::HashMap};
 
-use serde::{Deserialize, Serialize};
-
-use crate::database::{Database, DbError};
+use crate::database::{Database, DbError, PersistentValue};
 
 pub enum StorageError {
     Db(DbError),
     Value,
+    KeyNotFound,
 }
 
 pub struct GlobalStorage<'a> {
-    db: &'a dyn Database,
+    db: &'a Database,
     cache: &'a mut GlobalStorageCache,
     pub(crate) effects: HashMap<String, GlobalEffect>,
 }
-
-pub trait PersistentValue: 'static + Serialize + for<'a> Deserialize<'a> {}
 
 pub struct GlobalStorageCache {
     map: HashMap<String, Box<dyn Any>>,
@@ -27,7 +24,7 @@ pub enum GlobalEffect {
 }
 
 impl<'a> GlobalStorage<'a> {
-    pub fn new(db: &'a dyn Database, cache: &'a mut GlobalStorageCache) -> Self {
+    pub fn new(db: &'a Database, cache: &'a mut GlobalStorageCache) -> Self {
         Self {
             db,
             cache,
@@ -45,7 +42,11 @@ impl<'a> GlobalStorage<'a> {
         self.cache.insert(key, value);
     }
 
-    pub fn borrow_mut<K, V>(&mut self, key: K) -> Option<&V>
+    pub fn has_any(&self, key: &str) -> bool {
+        todo!()
+    }
+
+    pub fn borrow_mut<V, K>(&mut self, key: K) -> &mut V
     where
         K: Into<String>,
         V: PersistentValue,
@@ -53,13 +54,16 @@ impl<'a> GlobalStorage<'a> {
         let key = key.into();
         self.populate_cache::<V>(key.clone());
         self.effects.insert(key.clone(), GlobalEffect::Modified);
-        self.cache.get(&key)
+        self.cache
+            .get_mut(&key)
+            .unwrap_or_else(|| std::panic::panic_any(StorageError::KeyNotFound))
     }
 
     pub fn remove<K>(&mut self, key: K)
     where
         K: Into<String>,
     {
+        // TODO: delete from cache
         self.effects.insert(key.into(), GlobalEffect::Deleted);
     }
 
@@ -70,13 +74,11 @@ impl<'a> GlobalStorage<'a> {
         if self.cache.contains_key(&key) {
             return;
         }
-        if let Some(bytes) = self
+        if let Some(value) = self
             .db
-            .get_resource(&key)
+            .get_resource::<V>(&key)
             .unwrap_or_else(|err| std::panic::panic_any(err))
         {
-            let value =
-                V::from_bytes(&bytes).unwrap_or_else(|| std::panic::panic_any(StorageError::Value));
             self.cache.insert(key, value);
         }
     }
@@ -120,13 +122,5 @@ impl GlobalStorageCache {
             .downcast_mut::<V>()
             .unwrap_or_else(|| std::panic::panic_any(StorageError::Value));
         Some(value)
-    }
-}
-
-impl PersistentValue for u32 {
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {}
-
-    fn as_bytes(&self) -> Vec<u8> {
-        todo!()
     }
 }

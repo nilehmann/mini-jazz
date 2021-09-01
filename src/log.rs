@@ -33,6 +33,33 @@ pub trait Log: Sized {
         to: AnyActorId,
         msg: AnyMessage,
     ) -> Result<Self::LogIndex, Self::Error>;
+}
 
-    async fn trim(&self, actor_id: AnyActorId, idx: Self::LogIndex) -> Result<(), Self::Error>;
+pub struct DummyLog;
+
+impl LogIndex for u32 {
+    const ZERO: Self = 0;
+}
+
+#[async_trait::async_trait]
+impl Log for DummyLog {
+    type LogIndex = u32;
+    type Error = Box<dyn std::error::Error>;
+
+    async fn read(
+        &mut self,
+        actor_id: AnyActorId,
+        idx: u32,
+    ) -> Result<Option<LogEntry<Self>>, Self::Error> {
+        todo!();
+    }
+
+    async fn append(
+        &mut self,
+        from: AnyActorId,
+        to: AnyActorId,
+        msg: AnyMessage,
+    ) -> Result<u32, Self::Error> {
+        todo!();
+    }
 }
